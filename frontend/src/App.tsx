@@ -1,121 +1,104 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
+import { type FormEvent, useState } from 'react'
 import './App.css'
 
+type PhraseCheckResponse = {
+  originalPhrase: string
+  correct: boolean
+  correctedPhrase: string
+  explanation: string
+  provider: string
+}
+
+const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
+
 function App() {
-  const [count, setCount] = useState(0)
+  const [phrase, setPhrase] = useState('')
+  const [result, setResult] = useState<PhraseCheckResponse | null>(null)
+  const [error, setError] = useState('')
+  const [isLoading, setIsLoading] = useState(false)
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    const submittedPhrase = phrase.trim()
+    if (!submittedPhrase || isLoading) {
+      return
+    }
+
+    setIsLoading(true)
+    setResult(null)
+    setError('')
+
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/check`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ phrase: submittedPhrase }),
+      })
+
+      if (!response.ok) {
+        throw new Error(`The server returned ${response.status}.`)
+      }
+
+      setResult((await response.json()) as PhraseCheckResponse)
+    } catch (requestError) {
+      const message =
+        requestError instanceof Error ? requestError.message : 'Unknown error'
+      setError(`Could not check the phrase. ${message}`)
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+    <main className="page">
+      <section className="checker">
+        <h1>Polish Writing Lab</h1>
 
-      <div className="ticks"></div>
+        <form onSubmit={handleSubmit}>
+          <div className="phrase-input">
+            <label htmlFor="phrase">Enter a Polish phrase</label>
+            <input
+              id="phrase"
+              name="phrase"
+              type="text"
+              value={phrase}
+              onChange={(event) => setPhrase(event.target.value)}
+              placeholder="Wpisz zdanie po polsku"
+              maxLength={500}
+              autoComplete="off"
+              autoFocus
+            />
+            <button
+              type="submit"
+              disabled={!phrase.trim() || isLoading}
+              aria-label="Check phrase"
+            >
+              {isLoading ? <span className="spinner" /> : '→'}
+            </button>
+          </div>
+        </form>
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
+        <div className="result-region" aria-live="polite">
+          {error && <p className="error">{error}</p>}
+
+          {result && (
+            <article className={`result ${result.correct ? 'correct' : 'incorrect'}`}>
+              <p className="result-status">
+                {result.correct ? 'Looks correct' : 'Suggested correction'}
+              </p>
+              {!result.correct && (
+                <p className="corrected-phrase">{result.correctedPhrase}</p>
+              )}
+              <p className="explanation">{result.explanation}</p>
+              <p className="provider">{result.provider} model response</p>
+            </article>
+          )}
         </div>
       </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
+    </main>
   )
 }
 
