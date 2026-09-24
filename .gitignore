@@ -1,0 +1,17 @@
+.DS_Store
+.idea/
+.vscode/
+*.iml
+
+**/node_modules/
+**/dist/
+**/coverage/
+**/cdk.out/
+
+backend/target/
+
+.env
+.env.*
+!.env.example
+
+*.log
