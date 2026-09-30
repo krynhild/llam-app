@@ -1,0 +1,9 @@
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: polishwritinglab
+      POSTGRES_USER: polishwritinglab
+      POSTGRES_PASSWORD: polishwritinglab
+    ports:
+      - "5432"

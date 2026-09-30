@@ -6,7 +6,12 @@
 **/node_modules/
 **/dist/
 **/coverage/
-**/cdk.out/
+
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
 
 backend/target/
 
