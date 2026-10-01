@@ -1,7 +1,7 @@
 variable "aws_region" {
   description = "AWS region to deploy into."
   type        = string
-  default     = "eu-central-1"
+  default     = "us-east-1"
 }
 
 variable "name" {
@@ -10,8 +10,8 @@ variable "name" {
   default     = "polish-writing-lab"
 }
 
-variable "image_tag" {
-  description = "Tag of the backend image in ECR to run."
+variable "release" {
+  description = "Release to deploy (git commit SHA): the backend image tag and the frontend folder releases/<release>/ in S3."
   type        = string
 }
 

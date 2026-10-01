@@ -2,13 +2,13 @@ mock_provider "aws" {
   override_data {
     target = data.aws_availability_zones.available
     values = {
-      names = ["eu-central-1a", "eu-central-1b", "eu-central-1c"]
+      names = ["us-east-1a", "us-east-1b", "us-east-1c"]
     }
   }
 
   mock_data "aws_region" {
     defaults = {
-      region = "eu-central-1"
+      region = "us-east-1"
     }
   }
 
@@ -17,7 +17,7 @@ mock_provider "aws" {
       address = "db.example.internal"
       port    = 5432
       master_user_secret = [{
-        secret_arn    = "arn:aws:secretsmanager:eu-central-1:123456789012:secret:rds-db-secret"
+        secret_arn    = "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds-db-secret"
         kms_key_id    = "alias/aws/secretsmanager"
         secret_status = "active"
       }]
@@ -30,15 +30,15 @@ mock_provider "aws" {
     }
   }
 
-  mock_resource "aws_lb" {
+  mock_resource "aws_service_discovery_service" {
     defaults = {
-      arn = "arn:aws:elasticloadbalancing:eu-central-1:123456789012:loadbalancer/app/pwl/0123456789abcdef"
+      arn = "arn:aws:servicediscovery:us-east-1:123456789012:service/srv-0123456789abcdef"
     }
   }
 
-  mock_resource "aws_lb_target_group" {
+  mock_resource "aws_apigatewayv2_api" {
     defaults = {
-      arn = "arn:aws:elasticloadbalancing:eu-central-1:123456789012:targetgroup/pwl/0123456789abcdef"
+      api_endpoint = "https://abc123.execute-api.us-east-1.amazonaws.com"
     }
   }
 
@@ -50,7 +50,7 @@ mock_provider "aws" {
 }
 
 variables {
-  image_tag = "test"
+  release = "3f9c2ab"
 }
 
 run "frontend_is_served_from_private_bucket" {
@@ -70,10 +70,10 @@ run "frontend_is_served_from_private_bucket" {
   }
 }
 
-run "api_is_routed_to_internal_alb" {
+run "api_is_routed_through_api_gateway" {
   assert {
-    condition     = aws_lb.backend.internal
-    error_message = "The ALB must be internal and reached only through the CloudFront VPC origin."
+    condition     = aws_apigatewayv2_api.backend.protocol_type == "HTTP"
+    error_message = "The API Gateway must use the HTTP protocol."
   }
 
   assert {
@@ -82,11 +82,6 @@ run "api_is_routed_to_internal_alb" {
       behavior.path_pattern == "/api/*" && behavior.target_origin_id == "backend"
     ])
     error_message = "CloudFront must route /api/* to the backend origin."
-  }
-
-  assert {
-    condition     = aws_lb_target_group.backend.health_check[0].path == "/actuator/health/readiness"
-    error_message = "The ALB must use the Spring Boot readiness probe."
   }
 }
 
@@ -132,5 +127,43 @@ run "database_is_private_and_encrypted" {
   assert {
     condition     = aws_vpc_security_group_ingress_rule.database_from_backend.referenced_security_group_id == aws_security_group.backend.id
     error_message = "Only backend tasks may connect to the database."
+  }
+}
+
+run "release_selects_backend_image_and_frontend_folder" {
+  assert {
+    condition     = endswith(jsondecode(aws_ecs_task_definition.backend.container_definitions)[0].image, ":3f9c2ab")
+    error_message = "The backend must run the image tagged with the release."
+  }
+
+  assert {
+    condition = anytrue([
+      for origin in aws_cloudfront_distribution.main.origin :
+      origin.origin_id == "site" && origin.origin_path == "/releases/3f9c2ab"
+    ])
+    error_message = "CloudFront must serve the frontend from the release folder."
+  }
+
+  assert {
+    condition = anytrue([
+      for behavior in aws_cloudfront_distribution.main.ordered_cache_behavior :
+      behavior.path_pattern == "/releases/*" && behavior.target_origin_id == "releases"
+    ])
+    error_message = "Assets of every release must stay reachable under /releases/<release>/."
+  }
+
+  assert {
+    condition     = aws_ecr_repository.backend.image_tag_mutability == "IMMUTABLE"
+    error_message = "Release image tags must not be overwritten."
+  }
+}
+
+run "only_main_branch_of_repository_can_publish" {
+  assert {
+    condition = (
+      jsondecode(aws_iam_role.github_publish.assume_role_policy).Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:sub"]
+      == "repo:krynhild/llam-app:ref:refs/heads/main"
+    )
+    error_message = "Only the main branch of the repository may assume the publish role."
   }
 }

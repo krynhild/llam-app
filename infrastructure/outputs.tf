@@ -19,6 +19,11 @@ output "cloudfront_distribution_id" {
   value = aws_cloudfront_distribution.main.id
 }
 
+output "github_publish_role_arn" {
+  description = "IAM role GitHub Actions assumes to publish releases."
+  value       = aws_iam_role.github_publish.arn
+}
+
 output "database_secret_arn" {
   value = aws_db_instance.main.master_user_secret[0].secret_arn
 }

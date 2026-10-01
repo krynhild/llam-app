@@ -50,21 +50,6 @@ resource "aws_cloudfront_origin_access_control" "site" {
   signing_protocol                  = "sigv4"
 }
 
-resource "aws_cloudfront_vpc_origin" "backend" {
-  vpc_origin_endpoint_config {
-    name                   = "${var.name}-backend"
-    arn                    = aws_lb.backend.arn
-    http_port              = 80
-    https_port             = 443
-    origin_protocol_policy = "http-only"
-
-    origin_ssl_protocols {
-      items    = ["TLSv1.2"]
-      quantity = 1
-    }
-  }
-}
-
 data "aws_cloudfront_cache_policy" "caching_optimized" {
   name = "Managed-CachingOptimized"
 }
@@ -78,8 +63,9 @@ data "aws_cloudfront_origin_request_policy" "all_viewer_except_host_header" {
 }
 
 locals {
-  site_origin_id    = "site"
-  backend_origin_id = "backend"
+  site_origin_id     = "site"
+  releases_origin_id = "releases"
+  backend_origin_id  = "backend"
 }
 
 resource "aws_cloudfront_distribution" "main" {
@@ -89,23 +75,45 @@ resource "aws_cloudfront_distribution" "main" {
   default_root_object = "index.html"
   price_class         = "PriceClass_100"
 
+  # Serves index.html of the live release. Releases are built with base /releases/<release>/, so their
+  # assets go through the "releases" origin and stay reachable for open tabs after a switch.
   origin {
     origin_id                = local.site_origin_id
+    domain_name              = aws_s3_bucket.site.bucket_regional_domain_name
+    origin_path              = "/releases/${var.release}"
+    origin_access_control_id = aws_cloudfront_origin_access_control.site.id
+  }
+
+  origin {
+    origin_id                = local.releases_origin_id
     domain_name              = aws_s3_bucket.site.bucket_regional_domain_name
     origin_access_control_id = aws_cloudfront_origin_access_control.site.id
   }
 
   origin {
     origin_id   = local.backend_origin_id
-    domain_name = aws_lb.backend.dns_name
+    domain_name = replace(aws_apigatewayv2_api.backend.api_endpoint, "https://", "")
 
-    vpc_origin_config {
-      vpc_origin_id = aws_cloudfront_vpc_origin.backend.id
+    custom_origin_config {
+      http_port              = 80
+      https_port             = 443
+      origin_protocol_policy = "https-only"
+      origin_ssl_protocols   = ["TLSv1.2"]
     }
   }
 
   default_cache_behavior {
     target_origin_id       = local.site_origin_id
+    viewer_protocol_policy = "redirect-to-https"
+    allowed_methods        = ["GET", "HEAD"]
+    cached_methods         = ["GET", "HEAD"]
+    compress               = true
+    cache_policy_id        = data.aws_cloudfront_cache_policy.caching_optimized.id
+  }
+
+  ordered_cache_behavior {
+    path_pattern           = "/releases/*"
+    target_origin_id       = local.releases_origin_id
     viewer_protocol_policy = "redirect-to-https"
     allowed_methods        = ["GET", "HEAD"]
     cached_methods         = ["GET", "HEAD"]

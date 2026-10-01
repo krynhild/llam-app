@@ -6,8 +6,9 @@ locals {
 data "aws_region" "current" {}
 
 resource "aws_ecr_repository" "backend" {
-  name         = "${var.name}/backend"
-  force_delete = true
+  name                 = "${var.name}/backend"
+  image_tag_mutability = "IMMUTABLE"
+  force_delete         = true
 
   image_scanning_configuration {
     scan_on_push = true
@@ -19,11 +20,11 @@ resource "aws_ecr_lifecycle_policy" "backend" {
   policy = jsonencode({
     rules = [{
       rulePriority = 1
-      description  = "Keep the 20 most recent images"
+      description  = "Keep the 50 most recent images"
       selection = {
         tagStatus   = "any"
         countType   = "imageCountMoreThan"
-        countNumber = 20
+        countNumber = 50
       }
       action = { type = "expire" }
     }]
@@ -81,8 +82,13 @@ resource "aws_ecs_cluster" "main" {
 
   setting {
     name  = "containerInsights"
-    value = "enhanced"
+    value = "disabled"
   }
+}
+
+resource "aws_ecs_cluster_capacity_providers" "main" {
+  cluster_name       = aws_ecs_cluster.main.name
+  capacity_providers = ["FARGATE", "FARGATE_SPOT"]
 }
 
 resource "aws_ecs_task_definition" "backend" {
@@ -101,7 +107,7 @@ resource "aws_ecs_task_definition" "backend" {
 
   container_definitions = jsonencode([{
     name      = local.container_name
-    image     = "${aws_ecr_repository.backend.repository_url}:${var.image_tag}"
+    image     = "${aws_ecr_repository.backend.repository_url}:${var.release}"
     essential = true
     portMappings = [{
       containerPort = local.container_port
@@ -139,41 +145,45 @@ resource "aws_ecs_task_definition" "backend" {
   }])
 }
 
-resource "aws_lb" "backend" {
-  name_prefix        = "pwl-"
-  internal           = true
-  load_balancer_type = "application"
-  subnets            = module.vpc.private_subnets
-  security_groups    = [aws_security_group.alb.id]
+resource "aws_service_discovery_http_namespace" "main" {
+  name = var.name
 }
 
-resource "aws_lb_target_group" "backend" {
-  name_prefix          = "pwl-"
-  port                 = local.container_port
-  protocol             = "HTTP"
-  target_type          = "ip"
-  vpc_id               = module.vpc.vpc_id
-  deregistration_delay = 30
-
-  health_check {
-    path    = "/actuator/health/readiness"
-    matcher = "200"
-  }
-
-  lifecycle {
-    create_before_destroy = true
-  }
+resource "aws_service_discovery_service" "backend" {
+  name         = "backend"
+  namespace_id = aws_service_discovery_http_namespace.main.id
 }
 
-resource "aws_lb_listener" "backend" {
-  load_balancer_arn = aws_lb.backend.arn
-  port              = 80
-  protocol          = "HTTP"
+resource "aws_apigatewayv2_api" "backend" {
+  name          = "${var.name}-backend"
+  protocol_type = "HTTP"
+}
 
-  default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.backend.arn
-  }
+resource "aws_apigatewayv2_vpc_link" "backend" {
+  name               = "${var.name}-backend"
+  subnet_ids         = module.vpc.private_subnets
+  security_group_ids = [aws_security_group.backend.id]
+}
+
+resource "aws_apigatewayv2_integration" "backend" {
+  api_id             = aws_apigatewayv2_api.backend.id
+  integration_type   = "HTTP_PROXY"
+  integration_method = "ANY"
+  integration_uri    = aws_service_discovery_service.backend.arn
+  connection_type    = "VPC_LINK"
+  connection_id      = aws_apigatewayv2_vpc_link.backend.id
+}
+
+resource "aws_apigatewayv2_route" "backend" {
+  api_id    = aws_apigatewayv2_api.backend.id
+  route_key = "ANY /{proxy+}"
+  target    = "integrations/${aws_apigatewayv2_integration.backend.id}"
+}
+
+resource "aws_apigatewayv2_stage" "backend" {
+  api_id      = aws_apigatewayv2_api.backend.id
+  name        = "$default"
+  auto_deploy = true
 }
 
 resource "aws_ecs_service" "backend" {
@@ -181,11 +191,20 @@ resource "aws_ecs_service" "backend" {
   cluster         = aws_ecs_cluster.main.id
   task_definition = aws_ecs_task_definition.backend.arn
   desired_count   = var.backend_desired_count
-  launch_type     = "FARGATE"
+
+  capacity_provider_strategy {
+    capacity_provider = "FARGATE_SPOT"
+    weight            = 1
+  }
+
+  capacity_provider_strategy {
+    capacity_provider = "FARGATE"
+    weight            = 0
+    base              = 1
+  }
 
   deployment_minimum_healthy_percent = 100
   deployment_maximum_percent         = 200
-  health_check_grace_period_seconds  = 90
   wait_for_steady_state              = true
 
   deployment_circuit_breaker {
@@ -199,11 +218,7 @@ resource "aws_ecs_service" "backend" {
     assign_public_ip = false
   }
 
-  load_balancer {
-    target_group_arn = aws_lb_target_group.backend.arn
-    container_name   = local.container_name
-    container_port   = local.container_port
+  service_registries {
+    registry_arn = aws_service_discovery_service.backend.arn
   }
-
-  depends_on = [aws_lb_listener.backend]
 }

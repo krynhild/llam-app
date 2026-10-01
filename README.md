@@ -50,27 +50,53 @@ CloudFront ─┬─ /*      → S3 (React build, private, Origin Access Control
 - RDS generates the database password and keeps it in Secrets Manager (never in Terraform state). ECS injects it as `SPRING_DATASOURCE_USERNAME`/`SPRING_DATASOURCE_PASSWORD`.
 - The ALB health check calls `/actuator/health/readiness`, which includes database connectivity.
 
-Terraform manages the infrastructure. `scripts/deploy.sh` handles the build artifacts that Terraform doesn't: it pushes the backend image to ECR (tagged with the git commit) and uploads the frontend build to S3.
+### Releases
+
+A release is identified by a git commit SHA and consists of two immutable artifacts:
+
+- the backend image `<ecr-repository>:<sha>` (ECR tags are immutable)
+- the frontend build in `s3://<site-bucket>/releases/<sha>/`, built with Vite `base` set to `/releases/<sha>/`
+
+The Terraform variable `release` selects the live release for both: ECS runs the image with that tag, and CloudFront serves `index.html` from that release's folder. Assets are always requested under `/releases/<sha>/...`, so browser tabs still running an older release keep working after a switch. `https://<site>/version.json` shows the release that is live.
+
+Publishing a release (uploading the artifacts) and deploying it (switching to it) are separate steps:
+
+- `scripts/publish.sh` builds and uploads the artifacts. CI runs it for every commit on `main`.
+- `scripts/deploy.sh` runs `terraform apply -var release=<sha>` and waits until the new backend tasks are healthy.
 
 ### Prerequisites
 
 - Terraform 1.10+, the AWS CLI, Docker and Node.js
-- AWS credentials for the target account (the region defaults to `eu-central-1`; override with `-var aws_region=...` or a `terraform.tfvars` file)
+- AWS credentials for the target account (the region defaults to `us-east-1`; override with `-var aws_region=...` or a `terraform.tfvars` file)
 
 ### Deploy
+
+Build, publish and deploy the current checkout (uncommitted changes get a `-dirty-<timestamp>` release):
 
 ```bash
 scripts/deploy.sh
 ```
 
-The script:
+Deploy a release that CI already published, or roll back to an earlier one:
 
-1. creates the ECR repository if needed
-2. builds and pushes the backend image
-3. runs `terraform apply`, which waits until the new backend tasks are healthy
-4. uploads the frontend and invalidates the CloudFront cache
+```bash
+RELEASE=<commit sha> scripts/deploy.sh
+```
 
-It prints the application URL at the end. The first run takes about 15 minutes, mostly for RDS and CloudFront.
+The script refuses to deploy a release whose artifacts are missing. It prints the application URL at the end. The first deploy takes about 15 minutes, mostly for RDS and CloudFront.
+
+### Publishing from GitHub Actions
+
+Terraform creates an IAM role that only the `main` branch of `krynhild/llam-app` can assume, through GitHub's OIDC provider. The role can push images and upload to `releases/` in the bucket, but it can't deploy anything. After the first deploy, set these repository variables (Settings → Secrets and variables → Actions → Variables) from the Terraform outputs:
+
+| Variable | Terraform output |
+|---|---|
+| `AWS_PUBLISH_ROLE_ARN` | `github_publish_role_arn` |
+| `AWS_REGION` | `aws_region` |
+| `ECR_REPOSITORY_URL` | `ecr_repository_url` |
+| `SITE_BUCKET` | `site_bucket` |
+
+Until `AWS_PUBLISH_ROLE_ARN` is set, the publish job is skipped. If the AWS account already has a GitHub OIDC provider, deploy with `-var create_github_oidc_provider=false`.
 
 ### State
 
@@ -81,7 +107,7 @@ terraform {
   backend "s3" {
     bucket       = "<your-state-bucket>"
     key          = "polish-writing-lab/terraform.tfstate"
-    region       = "eu-central-1"
+    region       = "us-east-1"
     use_lockfile = true
   }
 }
@@ -91,7 +117,7 @@ terraform {
 
 ```bash
 cd infrastructure
-terraform destroy -var image_tag=unused
+terraform destroy -var release=unused
 ```
 
 RDS takes a final snapshot named `polish-writing-lab-final` before it is deleted. Delete that snapshot before destroying a second time, otherwise the name clashes.

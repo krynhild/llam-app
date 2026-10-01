@@ -10,7 +10,7 @@ resource "aws_db_instance" "main" {
   instance_class = var.db_instance_class
 
   allocated_storage     = 20
-  max_allocated_storage = 100
+  max_allocated_storage = 20
   storage_type          = "gp3"
   storage_encrypted     = true
 
@@ -23,7 +23,7 @@ resource "aws_db_instance" "main" {
   vpc_security_group_ids = [aws_security_group.database.id]
   publicly_accessible    = false
 
-  backup_retention_period   = 7
+  backup_retention_period   = 1
   copy_tags_to_snapshot     = true
   skip_final_snapshot       = false
   final_snapshot_identifier = "${var.name}-final"

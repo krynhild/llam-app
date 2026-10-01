@@ -18,15 +18,24 @@ module "vpc" {
   private_subnets  = ["10.0.10.0/24", "10.0.11.0/24"]
   database_subnets = ["10.0.20.0/24", "10.0.21.0/24"]
 
-  enable_nat_gateway = true
-  single_nat_gateway = true
+  enable_nat_gateway = false
 
   create_database_subnet_group = true
 }
 
-resource "aws_security_group" "alb" {
-  name_prefix = "${var.name}-alb-"
-  description = "Internal ALB, reachable only through the CloudFront VPC origin"
+data "aws_ami" "fck_nat" {
+  most_recent = true
+  owners      = ["568608671756"]
+
+  filter {
+    name   = "name"
+    values = ["fck-nat-al2023-*-arm64-*"]
+  }
+}
+
+resource "aws_security_group" "nat" {
+  name_prefix = "${var.name}-nat-"
+  description = "fck-nat instance"
   vpc_id      = module.vpc.vpc_id
 
   lifecycle {
@@ -34,22 +43,32 @@ resource "aws_security_group" "alb" {
   }
 }
 
-# CloudFront VPC origin ENIs are placed inside the VPC.
-resource "aws_vpc_security_group_ingress_rule" "alb_from_vpc" {
-  security_group_id = aws_security_group.alb.id
-  description       = "CloudFront VPC origin"
+resource "aws_vpc_security_group_ingress_rule" "nat_from_private" {
+  security_group_id = aws_security_group.nat.id
   cidr_ipv4         = module.vpc.vpc_cidr_block
-  ip_protocol       = "tcp"
-  from_port         = 80
-  to_port           = 80
+  ip_protocol       = "-1"
 }
 
-resource "aws_vpc_security_group_egress_rule" "alb_to_backend" {
-  security_group_id            = aws_security_group.alb.id
-  referenced_security_group_id = aws_security_group.backend.id
-  ip_protocol                  = "tcp"
-  from_port                    = local.container_port
-  to_port                      = local.container_port
+resource "aws_vpc_security_group_egress_rule" "nat_to_internet" {
+  security_group_id = aws_security_group.nat.id
+  cidr_ipv4         = "0.0.0.0/0"
+  ip_protocol       = "-1"
+}
+
+resource "aws_instance" "nat" {
+  ami                         = data.aws_ami.fck_nat.id
+  instance_type               = "t4g.nano"
+  subnet_id                   = module.vpc.public_subnets[0]
+  vpc_security_group_ids      = [aws_security_group.nat.id]
+  source_dest_check           = false
+  associate_public_ip_address = true
+}
+
+resource "aws_route" "private_nat" {
+  count                  = length(module.vpc.private_route_table_ids)
+  route_table_id         = module.vpc.private_route_table_ids[count.index]
+  destination_cidr_block = "0.0.0.0/0"
+  network_interface_id   = aws_instance.nat.primary_network_interface_id
 }
 
 resource "aws_security_group" "backend" {
@@ -62,15 +81,15 @@ resource "aws_security_group" "backend" {
   }
 }
 
-resource "aws_vpc_security_group_ingress_rule" "backend_from_alb" {
+resource "aws_vpc_security_group_ingress_rule" "backend_from_vpc_link" {
   security_group_id            = aws_security_group.backend.id
-  referenced_security_group_id = aws_security_group.alb.id
+  referenced_security_group_id = aws_security_group.backend.id
   ip_protocol                  = "tcp"
   from_port                    = local.container_port
   to_port                      = local.container_port
 }
 
-# Needed to pull images from ECR, read secrets, and call external APIs through the NAT gateway.
+# Needed to pull images from ECR, read secrets, and call external APIs through the fck-nat instance.
 resource "aws_vpc_security_group_egress_rule" "backend_to_internet" {
   security_group_id = aws_security_group.backend.id
   cidr_ipv4         = "0.0.0.0/0"

@@ -1,42 +1,53 @@
 #!/usr/bin/env bash
-# Builds and deploys the whole application to AWS.
+# Deploys a release: points ECS and CloudFront at it and waits for the backend to become healthy.
+#
+#   scripts/deploy.sh                 build and publish the current checkout, then deploy it
+#   RELEASE=<sha> scripts/deploy.sh   deploy a release already published by GitHub Actions
+#
 # Extra arguments are passed to the main `terraform apply`, e.g. `scripts/deploy.sh -auto-approve`.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 tf() { terraform -chdir="$root/infrastructure" "$@"; }
 
-image_tag="$(git -C "$root" rev-parse --short HEAD)"
-if ! git -C "$root" diff --quiet HEAD; then
-  image_tag="$image_tag-dirty-$(date +%Y%m%d%H%M%S)"
+if [[ -n "${RELEASE:-}" ]]; then
+  release="$RELEASE"
+  build=false
+else
+  release="$(git -C "$root" rev-parse HEAD)"
+  if ! git -C "$root" diff --quiet HEAD; then
+    release="$release-dirty-$(date +%Y%m%d%H%M%S)"
+  fi
+  build=true
 fi
 
 echo "==> Initializing Terraform"
 tf init -input=false
 
-echo "==> Ensuring the ECR repository exists"
-tf apply -input=false -auto-approve -target=aws_ecr_repository.backend -var "image_tag=$image_tag"
+echo "==> Ensuring the ECR repository and site bucket exist"
+tf apply -input=false -auto-approve \
+  -target=aws_ecr_repository.backend -target=aws_s3_bucket.site -var "release=$release"
 
-repository_url="$(tf output -raw ecr_repository_url)"
-region="$(tf output -raw aws_region)"
+export ECR_REPOSITORY_URL SITE_BUCKET AWS_REGION RELEASE="$release"
+ECR_REPOSITORY_URL="$(tf output -raw ecr_repository_url)"
+SITE_BUCKET="$(tf output -raw site_bucket)"
+AWS_REGION="$(tf output -raw aws_region)"
 
-echo "==> Building and pushing backend image $repository_url:$image_tag"
-aws ecr get-login-password --region "$region" |
-  docker login --username AWS --password-stdin "${repository_url%%/*}"
-docker build --platform linux/arm64 -t "$repository_url:$image_tag" "$root/backend"
-docker push "$repository_url:$image_tag"
+if [[ "$build" == true ]]; then
+  "$root/scripts/publish.sh"
+else
+  aws ecr describe-images --repository-name "${ECR_REPOSITORY_URL#*/}" --image-ids "imageTag=$release" >/dev/null ||
+    { echo "Backend image $release is not published" >&2; exit 1; }
+  aws s3api head-object --bucket "$SITE_BUCKET" --key "releases/$release/index.html" >/dev/null ||
+    { echo "Frontend release $release is not published" >&2; exit 1; }
+fi
 
-echo "==> Applying infrastructure (waits for the backend to become healthy)"
-tf apply -input=false -var "image_tag=$image_tag" "$@"
+echo "==> Deploying release $release"
+tf apply -input=false -var "release=$release" "$@"
 
-echo "==> Building and uploading frontend"
-(cd "$root/frontend" && npm ci && npm run build)
-bucket="$(tf output -raw site_bucket)"
-aws s3 sync "$root/frontend/dist/assets" "s3://$bucket/assets" \
-  --cache-control "public, max-age=31536000, immutable"
-aws s3 sync "$root/frontend/dist" "s3://$bucket" --delete --exclude "assets/*" \
-  --cache-control "no-cache"
+# Only these URLs are shared between releases.
 aws cloudfront create-invalidation \
-  --distribution-id "$(tf output -raw cloudfront_distribution_id)" --paths "/*" >/dev/null
+  --distribution-id "$(tf output -raw cloudfront_distribution_id)" \
+  --paths "/" "/index.html" "/version.json" >/dev/null
 
-echo "==> Deployed: $(tf output -raw site_url)"
+echo "==> Deployed $release: $(tf output -raw site_url)"

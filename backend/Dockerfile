@@ -1,4 +1,5 @@
-FROM maven:3.9-eclipse-temurin-25 AS build
+# The jar is platform-independent, so compile natively even when building an image for another CPU architecture.
+FROM --platform=$BUILDPLATFORM maven:3.9-eclipse-temurin-25 AS build
 WORKDIR /workspace
 COPY pom.xml ./
 RUN --mount=type=cache,target=/root/.m2 mvn --batch-mode dependency:go-offline
