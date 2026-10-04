@@ -1,7 +1,7 @@
-variable "github_repository" {
-  description = "GitHub repository (owner/name) allowed to publish releases."
+variable "github_oidc_subject_prefix" {
+  description = "OIDC subject prefix of the GitHub repository allowed to publish releases, as reported by GET /repos/{owner}/{repo}/actions/oidc/customization/sub (sub_claim_prefix)."
   type        = string
-  default     = "krynhild/llam-app"
+  default     = "repo:krynhild@19285610/llam-app@1384926502"
 }
 
 variable "create_github_oidc_provider" {
@@ -41,7 +41,7 @@ resource "aws_iam_role" "github_publish" {
       Condition = {
         StringEquals = {
           "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
-          "token.actions.githubusercontent.com:sub" = "repo:${var.github_repository}:ref:refs/heads/main"
+          "token.actions.githubusercontent.com:sub" = "${var.github_oidc_subject_prefix}:ref:refs/heads/main"
         }
       }
     }]

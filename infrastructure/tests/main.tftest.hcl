@@ -162,7 +162,7 @@ run "only_main_branch_of_repository_can_publish" {
   assert {
     condition = (
       jsondecode(aws_iam_role.github_publish.assume_role_policy).Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:sub"]
-      == "repo:krynhild/llam-app:ref:refs/heads/main"
+      == "repo:krynhild@19285610/llam-app@1384926502:ref:refs/heads/main"
     )
     error_message = "Only the main branch of the repository may assume the publish role."
   }
