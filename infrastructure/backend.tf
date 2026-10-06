@@ -145,13 +145,24 @@ resource "aws_ecs_task_definition" "backend" {
   }])
 }
 
-resource "aws_service_discovery_http_namespace" "main" {
-  name = var.name
+resource "aws_service_discovery_private_dns_namespace" "main" {
+  name = "${var.name}.local"
+  vpc  = module.vpc.vpc_id
 }
 
 resource "aws_service_discovery_service" "backend" {
   name         = "backend"
-  namespace_id = aws_service_discovery_http_namespace.main.id
+  namespace_id = aws_service_discovery_private_dns_namespace.main.id
+
+  dns_config {
+    namespace_id   = aws_service_discovery_private_dns_namespace.main.id
+    routing_policy = "MULTIVALUE"
+
+    dns_records {
+      type = "SRV"
+      ttl  = 10
+    }
+  }
 }
 
 resource "aws_apigatewayv2_api" "backend" {
@@ -220,5 +231,6 @@ resource "aws_ecs_service" "backend" {
 
   service_registries {
     registry_arn = aws_service_discovery_service.backend.arn
+    port         = local.container_port
   }
 }
