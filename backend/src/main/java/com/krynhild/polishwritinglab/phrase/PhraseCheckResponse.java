@@ -5,5 +5,6 @@ public record PhraseCheckResponse(
 		boolean correct,
 		String correctedPhrase,
 		String explanation,
-		String provider) {
+		String provider,
+		TokenUsage tokenUsage) {
 }

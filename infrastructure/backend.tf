@@ -53,14 +53,23 @@ resource "aws_iam_role_policy_attachment" "backend_execution" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
+# Terraform only creates the secret; its value is set with the AWS CLI so the key never lands in Terraform state.
+resource "aws_secretsmanager_secret" "runpod_api_key" {
+  name_prefix = "${var.name}-runpod-api-key-"
+  description = "API key of the vLLM server on RunPod"
+}
+
 resource "aws_iam_role_policy" "backend_execution_secrets" {
   role = aws_iam_role.backend_execution.id
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Effect   = "Allow"
-      Action   = "secretsmanager:GetSecretValue"
-      Resource = aws_db_instance.main.master_user_secret[0].secret_arn
+      Effect = "Allow"
+      Action = "secretsmanager:GetSecretValue"
+      Resource = [
+        aws_db_instance.main.master_user_secret[0].secret_arn,
+        aws_secretsmanager_secret.runpod_api_key.arn,
+      ]
     }]
   })
 }
@@ -123,6 +132,18 @@ resource "aws_ecs_task_definition" "backend" {
         name  = "APP_CORS_ALLOWED_ORIGIN"
         value = "https://${aws_cloudfront_distribution.main.domain_name}"
       },
+      {
+        name  = "APP_LANGUAGE_MODEL_PROVIDER"
+        value = "runpod"
+      },
+      {
+        name  = "APP_RUNPOD_BASE_URL"
+        value = var.runpod_base_url
+      },
+      {
+        name  = "APP_RUNPOD_MODEL"
+        value = var.runpod_model
+      },
     ]
     secrets = [
       {
@@ -132,6 +153,10 @@ resource "aws_ecs_task_definition" "backend" {
       {
         name      = "SPRING_DATASOURCE_PASSWORD"
         valueFrom = "${aws_db_instance.main.master_user_secret[0].secret_arn}:password::"
+      },
+      {
+        name      = "APP_RUNPOD_API_KEY"
+        valueFrom = aws_secretsmanager_secret.runpod_api_key.arn
       },
     ]
     logConfiguration = {

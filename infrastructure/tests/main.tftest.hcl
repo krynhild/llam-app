@@ -24,6 +24,12 @@ mock_provider "aws" {
     }
   }
 
+  mock_resource "aws_secretsmanager_secret" {
+    defaults = {
+      arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:runpod-api-key"
+    }
+  }
+
   mock_resource "aws_iam_role" {
     defaults = {
       arn = "arn:aws:iam::123456789012:role/pwl-role"
@@ -50,7 +56,8 @@ mock_provider "aws" {
 }
 
 variables {
-  release = "3f9c2ab"
+  release         = "3f9c2ab"
+  runpod_base_url = "https://pod123-8000.proxy.runpod.net"
 }
 
 run "frontend_is_served_from_private_bucket" {
@@ -95,8 +102,11 @@ run "backend_runs_on_fargate_with_database_secrets" {
     condition = toset([for env in jsondecode(aws_ecs_task_definition.backend.container_definitions)[0].environment : env.name]) == toset([
       "SPRING_DATASOURCE_URL",
       "APP_CORS_ALLOWED_ORIGIN",
+      "APP_LANGUAGE_MODEL_PROVIDER",
+      "APP_RUNPOD_BASE_URL",
+      "APP_RUNPOD_MODEL",
     ])
-    error_message = "The backend needs the datasource URL and the allowed CORS origin."
+    error_message = "The backend needs the datasource URL, the allowed CORS origin and the RunPod model settings."
   }
 
   assert {
@@ -108,8 +118,14 @@ run "backend_runs_on_fargate_with_database_secrets" {
     condition = toset([for secret in jsondecode(aws_ecs_task_definition.backend.container_definitions)[0].secrets : secret.name]) == toset([
       "SPRING_DATASOURCE_USERNAME",
       "SPRING_DATASOURCE_PASSWORD",
+      "APP_RUNPOD_API_KEY",
     ])
-    error_message = "Database credentials must come from Secrets Manager."
+    error_message = "Database credentials and the RunPod API key must come from Secrets Manager."
+  }
+
+  assert {
+    condition     = contains(jsondecode(aws_iam_role_policy.backend_execution_secrets.policy).Statement[0].Resource, aws_secretsmanager_secret.runpod_api_key.arn)
+    error_message = "ECS must be allowed to read the RunPod API key secret."
   }
 }
 

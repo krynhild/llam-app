@@ -7,6 +7,13 @@ type PhraseCheckResponse = {
   correctedPhrase: string
   explanation: string
   provider: string
+  tokenUsage: TokenUsage | null
+}
+
+type TokenUsage = {
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
 }
 
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
@@ -93,7 +100,16 @@ function App() {
                 <p className="corrected-phrase">{result.correctedPhrase}</p>
               )}
               <p className="explanation">{result.explanation}</p>
-              <p className="provider">{result.provider} model response</p>
+              <p className="provider">
+                {result.provider} model response
+                {result.tokenUsage && (
+                  <>
+                    {' · '}
+                    {result.tokenUsage.totalTokens} tokens ({result.tokenUsage.promptTokens} in,{' '}
+                    {result.tokenUsage.completionTokens} out)
+                  </>
+                )}
+              </p>
             </article>
           )}
         </div>

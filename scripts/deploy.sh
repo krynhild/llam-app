@@ -24,14 +24,22 @@ fi
 echo "==> Initializing Terraform"
 tf init -input=false
 
-echo "==> Ensuring the ECR repository and site bucket exist"
+echo "==> Ensuring the ECR repository, site bucket and RunPod API key secret exist"
 tf apply -input=false -auto-approve \
-  -target=aws_ecr_repository.backend -target=aws_s3_bucket.site -var "release=$release"
+  -target=aws_ecr_repository.backend -target=aws_s3_bucket.site -target=aws_secretsmanager_secret.runpod_api_key \
+  -var "release=$release"
 
 export ECR_REPOSITORY_URL SITE_BUCKET AWS_REGION RELEASE="$release"
 ECR_REPOSITORY_URL="$(tf output -raw ecr_repository_url)"
 SITE_BUCKET="$(tf output -raw site_bucket)"
 AWS_REGION="$(tf output -raw aws_region)"
+
+runpod_secret="$(tf output -raw runpod_api_key_secret_arn)"
+aws secretsmanager get-secret-value --secret-id "$runpod_secret" --query VersionId --output text >/dev/null 2>&1 || {
+  echo "The RunPod API key secret has no value yet. Set it, then rerun this script:" >&2
+  echo "  aws secretsmanager put-secret-value --secret-id '$runpod_secret' --secret-string '<vLLM API key>'" >&2
+  exit 1
+}
 
 if [[ "$build" == true ]]; then
   "$root/scripts/publish.sh"

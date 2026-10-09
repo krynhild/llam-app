@@ -20,6 +20,16 @@ cd backend
 ./mvnw spring-boot:run
 ```
 
+By default the backend uses a mock language model. To use the model on RunPod locally:
+
+```bash
+APP_LANGUAGE_MODEL_PROVIDER=runpod \
+APP_RUNPOD_BASE_URL=https://<pod-id>-8000.proxy.runpod.net \
+APP_RUNPOD_API_KEY=<vLLM API key> \
+APP_RUNPOD_MODEL=Qwen/Qwen3-8B \
+./mvnw spring-boot:run
+```
+
 ### Frontend
 
 ```bash
@@ -63,6 +73,19 @@ Publishing a release (uploading the artifacts) and deploying it (switching to it
 
 - `scripts/publish.sh` builds and uploads the artifacts. CI runs it for every commit on `main`.
 - `scripts/deploy.sh` runs `terraform apply -var release=<sha>` and waits until the new backend tasks are healthy.
+
+### Language model
+
+The backend calls a vLLM server on RunPod through its OpenAI-compatible `/v1/chat/completions` API and returns the token usage of each check to the frontend. Calls time out after 25 seconds, because API Gateway gives up after 30.
+
+- `runpod_base_url` and `runpod_model` are Terraform variables; set them in `infrastructure/terraform.tfvars` (see `terraform.tfvars.example`).
+- The vLLM API key (the pod's `VLLM_API_KEY`, not the RunPod account key) lives in a Secrets Manager secret that Terraform creates without a value, so the key stays out of Terraform state. `scripts/deploy.sh` stops and prints the command to set it if it is empty:
+
+  ```bash
+  aws secretsmanager put-secret-value --secret-id "$(terraform -chdir=infrastructure output -raw runpod_api_key_secret_arn)" --secret-string '<vLLM API key>'
+  ```
+
+  After changing the key, restart the tasks: `aws ecs update-service --cluster polish-writing-lab --service backend --force-new-deployment`.
 
 ### Prerequisites
 

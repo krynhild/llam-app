@@ -3,9 +3,6 @@ package com.krynhild.polishwritinglab.phrase;
 import java.util.Locale;
 import java.util.Map;
 
-import org.springframework.stereotype.Component;
-
-@Component
 public class MockLanguageModelClient implements LanguageModelClient {
 
 	private static final Map<String, Correction> CORRECTIONS = Map.of(
@@ -33,7 +30,8 @@ public class MockLanguageModelClient implements LanguageModelClient {
 					true,
 					trimmedPhrase,
 					"The mock language model found no known error in this phrase.",
-					"mock");
+					"mock",
+					null);
 		}
 
 		return new PhraseCheckResponse(
@@ -41,7 +39,8 @@ public class MockLanguageModelClient implements LanguageModelClient {
 				false,
 				correction.correctedPhrase(),
 				correction.explanation(),
-				"mock");
+				"mock",
+				null);
 	}
 
 	private String normalize(String phrase) {

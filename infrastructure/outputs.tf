@@ -24,6 +24,11 @@ output "github_publish_role_arn" {
   value       = aws_iam_role.github_publish.arn
 }
 
+output "runpod_api_key_secret_arn" {
+  description = "Secret holding the RunPod vLLM API key. Set its value with `aws secretsmanager put-secret-value`."
+  value       = aws_secretsmanager_secret.runpod_api_key.arn
+}
+
 output "database_secret_arn" {
   value = aws_db_instance.main.master_user_secret[0].secret_arn
 }

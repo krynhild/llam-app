@@ -1,0 +1,3 @@
+# Copy to terraform.tfvars (gitignored) and fill in.
+runpod_base_url = "https://<pod-id>-8000.proxy.runpod.net"
+runpod_model    = "Qwen/Qwen3-8B"

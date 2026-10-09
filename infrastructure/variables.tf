@@ -21,6 +21,17 @@ variable "backend_desired_count" {
   default     = 1
 }
 
+variable "runpod_base_url" {
+  description = "Base URL of the vLLM server on RunPod, e.g. https://<pod-id>-8000.proxy.runpod.net. Its API key is read from the runpod_api_key secret."
+  type        = string
+}
+
+variable "runpod_model" {
+  description = "Model name served by the vLLM server."
+  type        = string
+  default     = "Qwen/Qwen3-8B"
+}
+
 variable "db_instance_class" {
   description = "RDS instance class."
   type        = string
