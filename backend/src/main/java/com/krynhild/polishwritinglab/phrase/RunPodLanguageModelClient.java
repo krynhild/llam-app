@@ -5,6 +5,8 @@ import java.util.Map;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.util.Assert;
 import org.springframework.web.client.RestClient;
@@ -16,6 +18,8 @@ import tools.jackson.databind.json.JsonMapper;
 
 /** Calls a vLLM server on RunPod through its OpenAI-compatible chat completions API. */
 public class RunPodLanguageModelClient implements LanguageModelClient {
+
+	private static final Logger log = LoggerFactory.getLogger(RunPodLanguageModelClient.class);
 
 	private static final String SYSTEM_PROMPT = """
 			You are a Polish language tutor. Check the user's Polish phrase for grammar, spelling, \
@@ -87,8 +91,6 @@ public class RunPodLanguageModelClient implements LanguageModelClient {
 				"model", properties.model(),
 				"temperature", 0.2,
 				"max_tokens", 400,
-				// Qwen3 otherwise spends tokens and time on a reasoning block before answering.
-				"chat_template_kwargs", Map.of("enable_thinking", false),
 				"response_format", RESPONSE_FORMAT,
 				"messages", List.of(
 						Map.of("role", "system", "content", SYSTEM_PROMPT),
@@ -107,6 +109,7 @@ public class RunPodLanguageModelClient implements LanguageModelClient {
 	}
 
 	private static ResponseStatusException unavailable(String reason, Throwable cause) {
+		log.warn(reason, cause);
 		return new ResponseStatusException(HttpStatus.BAD_GATEWAY, reason, cause);
 	}
 
